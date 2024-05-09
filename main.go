@@ -1,10 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
-
-	"github.com/gin-gonic/gin"
 )
 
 //data
@@ -29,62 +29,66 @@ func findBookById(id string) (*book, error){
 	}
 	return nil, errors.New("Book not found!")
 }
-//routes
-func getBooks(context *gin.Context){
-	context.IndentedJSON(http.StatusOK, books)
-}
-func createBook(context *gin.Context){
-	var newBook book
-	if err := context.BindJSON(&newBook); err != nil{
-		return
-	}
-
-	books = append(books, newBook)
-	context.IndentedJSON(http.StatusCreated, newBook)
-}
-
-func getBookById(context *gin.Context){
-	id := context.Param("id")
-	book, err := findBookById(id)
-
-	if err != nil {
-		context.IndentedJSON(http.StatusNotFound, gin.H{"message":"Book not found!"})
-		return 
-	}
-	context.IndentedJSON(http.StatusOK, book)
-}
-
-func checkoutBook(context *gin.Context){
-	id, ok := context.GetQuery("id")
-
-	if ok == false{
-		context.IndentedJSON(http.StatusNotFound, gin.H{"message":"Book not found!"})
-		return
-	}
-	book, err := findBookById(id)
-
-	if err != nil {
-		context.IndentedJSON(http.StatusNotFound, gin.H{"message":"Book not found!"})
-		return
-	}
-
-	if book.Quantity < 1{
-		context.IndentedJSON(http.StatusNotFound, gin.H{"message":"Book not Available!"})
-		return
-	}
-	book.Quantity--;
-	context.IndentedJSON(http.StatusOK, book)
-}
-
-
 
 //main
 func main(){
+	mux := http.NewServeMux()
 
-	router := gin.Default()
-	router.GET("/books", getBooks)
-	router.POST("/books", createBook)
-	router.GET("/books/:id", getBookById)
-	router.PATCH("/checkout", checkoutBook)
-	router.Run("localhost:8080")
+	mux.HandleFunc("GET /books", func (w http.ResponseWriter, r *http.Request){
+		j, err := json.Marshal(books)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write(j)
+	})
+
+	mux.HandleFunc("POST /books", func(w http.ResponseWriter, r *http.Request) {
+		var newBook book
+
+		if err := json.NewDecoder(r.Body).Decode(&newBook); err != nil{
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		books = append(books, newBook)
+		w.WriteHeader(http.StatusCreated)
+
+	})
+
+	mux.HandleFunc("GET /books/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+
+		book,err := findBookById(id)
+		if err != nil{
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		j, err := json.Marshal(book)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write(j)
+	})
+
+	mux.HandleFunc("PATCH /checkout", func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Query().Get("id")
+		
+		book,err := findBookById(id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+		}
+		if book.Quantity < 1{
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		book.Quantity--;
+		w.WriteHeader(http.StatusOK)
+	})
+
+	if err := http.ListenAndServe(":8080", mux); err != nil{
+		fmt.Printf(err.Error())
+	}
 }
